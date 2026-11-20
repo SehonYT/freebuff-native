@@ -17,7 +17,7 @@ const TARGET = process.env.CODEBUFF_BINARY_TARGET || "linux-arm64"
 const LOADER = TARGET === "linux-x64"
   ? path.join(GLIBC, "ld-linux-x86-64.so.2")
   : path.join(GLIBC, "ld-linux-aarch64.so.1")
-const CHILD_ENV = { ...process.env, LD_LIBRARY_PATH: GLIBC }
+const CHILD_ENV = process.env // library resolution is explicit: --library-path
 
 function run(cmd, args, opts) {
   try {
@@ -52,11 +52,8 @@ function applyNativePatch(bin) {
       console.error('freebuff hook: patched glibc set missing at ' + GLIBC + '; run install.sh again')
       return false
     }
-    // Optional rewrite: makes direct exec work too; not required because the
-    // launcher spawns through the loader (FREEBUFF_LOADER_PATH).
-    if (!run('patchelf', ['--set-interpreter', LOADER, '--set-rpath', GLIBC, bin])) {
-      console.error('freebuff hook: patchelf unavailable/failed; using loader-exec mode')
-    }
+    // No patchelf: the launcher spawns through the private loader
+    // (FREEBUFF_LOADER_PATH), which needs no interpreter or rpath rewrite.
     if (TARGET !== "linux-x64") {
       if (!run('node', [path.join(DIR, 'patch-syscalls.mjs'), bin])) return false
     }

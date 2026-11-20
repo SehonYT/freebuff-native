@@ -31,7 +31,6 @@ export CODEBUFF_NO_TERMINAL_WATCHDOG=1
 # needed, patchelf optional) and libraries resolve through the private set.
 export FREEBUFF_LOADER_PATH="$DIR/lib/@LOADER@"
 export FREEBUFF_LIB_DIR="$DIR/lib"
-export LD_LIBRARY_PATH="$DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 if ! (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null; then
   nohup node "$DIR/proxy.mjs" >/dev/null 2>&1 &
@@ -39,8 +38,7 @@ if ! (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null; then
 fi
 
 repatch() {
-  # Optional: makes direct exec work too; loader-exec mode needs neither.
-  patchelf --set-interpreter "$DIR/lib/@LOADER@" --set-rpath "$DIR/lib" "$1" >&2 2>/dev/null || true
+  # No patchelf: the launcher spawns via the private loader (--library-path).
   if [ "@TARGET@" != "linux-x64" ]; then
     node "$DIR/patch-syscalls.mjs" "$1" >&2 || true
   fi

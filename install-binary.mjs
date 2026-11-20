@@ -83,11 +83,9 @@ if (!fs.existsSync(bin)) {
 }
 fs.chmodSync(bin, 0o755)
 
-try {
-  sh("patchelf", ["--set-interpreter", LOADER, "--set-rpath", GLIBC, bin])
-} catch (e) {
-  console.log("install-binary: patchelf unavailable (fine: loader-exec mode)")
-}
+// No patchelf anywhere: the launcher spawns the private loader directly,
+// which sidesteps PT_INTERP/DT_RUNPATH entirely (and buggy patchelf builds
+// have been observed mangling the dynamic section on some devices).
 if (TARGET !== "linux-x64") {
   sh("node", [path.join(DIR, "patch-syscalls.mjs"), bin])
 }
@@ -104,7 +102,7 @@ const verify = () => {
 }
 if (!verify()) {
   console.error("install-binary: patched binary failed verification on this device; diagnostics:")
-  const diagEnv = { ...process.env, LD_LIBRARY_PATH: GLIBC }
+  const diagEnv = process.env // library resolution is explicit: --library-path
   const show = (label, fn) => {
     console.error("--- " + label + " ---")
     try {

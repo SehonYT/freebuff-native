@@ -48,8 +48,12 @@ stop it from running on Android:
 
 ### 1. No 64-bit dynamic loader
 Android userland has no `/lib/ld-linux-aarch64.so.1`. The installer
-downloads a pinned Debian glibc 2.31 set (sha256-verified), keeps it in
-`lib/`, and `patchelf`es the binary to that interpreter and rpath.
+downloads a pinned Debian glibc 2.31 set (sha256-verified) into `lib/`, and
+the launcher runs the CLI **through that loader directly**
+(`ld.so --library-path lib freebuff`), which sidesteps the binary's
+interpreter and rpath entirely — no patchelf, no ELF rewriting. This works
+identically on 32-bit-userland devices (armv8l): the arm64 kernel executes
+the loader natively regardless of the shell's bitness.
 
 ### 2. Android app seccomp raises SIGSYS instead of ENOSYS
 For arm64 syscall numbers the sandbox filter does not know, the process is
@@ -115,10 +119,10 @@ time and never committed.
 
 ## Troubleshooting
 
-- `CANNOT LINK EXECUTABLE "patchelf" ... _ZNSt6__ndk113__hash_memory...`:
-  a broken Termux `patchelf`/`libc++` package pair. The installer now runs
-  in loader-exec mode and does not need patchelf at all; to fix the package
-  itself anyway: `pkg update && pkg upgrade -y libc++ patchelf`.
+- A broken `patchelf` on your device (`CANNOT LINK EXECUTABLE` or a
+  `libc.so: cannot open shared object file` failure) is harmless now: the
+  pipeline never invokes patchelf. If you saw that error, update the project
+  (`git fetch && git reset --hard origin/main`) and re-run `install.sh`.
 - `Bad system call` after an update: re-run `install.sh`; if it persists,
   the release likely uses a new blocked syscall — please open an issue.
 - A future release requiring glibc newer than 2.31 will fail verification

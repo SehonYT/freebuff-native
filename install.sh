@@ -81,18 +81,6 @@ for t in node npm curl tar xz dpkg-deb; do
   command -v "$t" >/dev/null 2>&1 || die "missing dependency even after pkg install: $t"
 done
 
-# patchelf is optional (the launcher spawns the private loader directly),
-# but broken installs on Termux (libc++ mismatch) are common, so test it.
-if command -v patchelf >/dev/null 2>&1; then
-  if ! patchelf --version >/dev/null 2>&1; then
-    say "patchelf is installed but broken (known Termux libc++ issue); trying an upgrade..."
-    pkg upgrade -y patchelf libc++ >/dev/null 2>&1 || true
-    patchelf --version >/dev/null 2>&1 || say "patchelf still broken; continuing in loader-exec mode (fully supported)"
-  fi
-else
-  pkg install -y patchelf >/dev/null 2>&1 || true
-  patchelf --version >/dev/null 2>&1 || say "patchelf unavailable; continuing in loader-exec mode (fully supported)"
-fi
 
 # --- patched glibc set ---
 LIBDIR="$NATIVE_DIR/lib"
@@ -118,6 +106,9 @@ if [ ! -f "$LIBDIR/.patched" ]; then
     [ -n "$SRCF" ] || die "glibc file missing from package: $f"
     cp -L "$SRCF" "$LIBDIR/$f"
   done
+  # never create libc.so here: 32-bit Termux binaries link bionic libc.so and
+  # LD search would pick this 64-bit glibc up with fatal results.
+  rm -f "$LIBDIR/libc.so"
   if [ "$TARGET" = "linux-arm64" ]; then
     for f in "$LIBDIR"/ld-* "$LIBDIR"/libc.so.6 "$LIBDIR"/libpthread.so.0 "$LIBDIR"/libdl.so.2 "$LIBDIR"/libm.so.6 "$LIBDIR"/libresolv.so.2; do
       node "$NATIVE_DIR/patch-robust.mjs" "$f" || true
