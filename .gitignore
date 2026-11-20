@@ -1,0 +1,20 @@
+# device state, never commit
+bak/
+lib/
+cache/
+pristine/
+pkg/
+extract-test/
+freebuff.md5
+proxy.log
+*.tar.gz
+*.tgz
+*.deb
+# dev leftovers (root only; portable versions live in tools/)
+/freebuff
+/nohostsvc.*
+/cmp-libpthread.py
+/extract-ctx.py
+/tui-probe.py
+/tui-probe2.py
+/proxy-log.mjs
