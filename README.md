@@ -47,13 +47,20 @@ The Freebuff CLI is a Bun-compiled glibc-linked arm64 binary. Four things
 stop it from running on Android:
 
 ### 1. No 64-bit dynamic loader
-Android userland has no `/lib/ld-linux-aarch64.so.1`. The installer
-downloads a pinned Debian glibc 2.31 set (sha256-verified) into `lib/`, and
+Android userland has no `/lib/ld-linux-aarch64.so.1`. The installer writes
+the prebuilt patched glibc 2.31 set from a bundle committed to the repo
+(`runtime/linux-arm64-libs.tar.gz`, md5-verified per file) into `lib/`, and
 the launcher runs the CLI **through that loader directly**
 (`ld.so --library-path lib freebuff`), which sidesteps the binary's
 interpreter and rpath entirely — no patchelf, no ELF rewriting. This works
 identically on 32-bit-userland devices (armv8l): the arm64 kernel executes
 the loader natively regardless of the shell's bitness.
+
+Nothing runtime-critical is extracted by device tools anymore: some ROMs
+corrupt large extractions (observed: a sha-verified archive extracted into
+a mutated binary via the device tar, and a corrupted loader via dpkg-deb).
+Archives are unpacked in pure Node, and the glibc set is written from the
+committed bundle with checksum verification.
 
 ### 2. Android app seccomp raises SIGSYS instead of ENOSYS
 For arm64 syscall numbers the sandbox filter does not know, the process is
@@ -132,5 +139,11 @@ time and never committed.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The pinned glibc packages come from Debian
-(LGPL) and are downloaded, never committed.
+MIT — see [LICENSE](LICENSE).
+
+The `runtime/` bundle contains unmodified and patched files from Debian's
+`libc6_2.31-13+deb11u11_arm64.deb` (LGPL-2.1+). It is committed so installs
+are deterministic on devices with flaky extraction tools. Reproduce it
+byte-for-byte: download the pinned .deb (URL and checksum in `install.sh`),
+extract, then run `patch-robust.mjs` over the lib set and
+`patch-libc-syscall.mjs` on `libc.so.6` — the same scripts that built it.

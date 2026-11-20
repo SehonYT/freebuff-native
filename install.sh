@@ -82,45 +82,43 @@ for t in node npm curl tar xz dpkg-deb; do
 done
 
 
-# --- patched glibc set ---
+# --- patched glibc runtime ---
 LIBDIR="$NATIVE_DIR/lib"
-if [ "$TARGET" = "linux-arm64" ]; then
-  DEB_ARCH="arm64"; DEB_SHA="$GLIBC_ARM64_SHA256"
-else
-  DEB_ARCH="amd64"; DEB_SHA="$GLIBC_AMD64_SHA256"
-fi
-DEB="libc6_${GLIBC_VERSION}_${DEB_ARCH}.deb"
 mkdir -p "$NATIVE_DIR/cache" "$LIBDIR"
-if [ ! -f "$LIBDIR/.patched" ]; then
-  if [ ! -f "$NATIVE_DIR/cache/$DEB" ]; then
-    say "downloading glibc ($DEB) from Debian..."
-    curl -fsSL --retry 5 --retry-delay 3 -o "$NATIVE_DIR/cache/$DEB" "$GLIBC_MIRROR/$DEB"
-  fi
-  echo "$DEB_SHA  $NATIVE_DIR/cache/$DEB" | sha256sum -c - >/dev/null 2>&1 \
-    || die "glibc package checksum mismatch; please report this with your device details"
-  say "extracting and patching glibc..."
-  WORK="$(mktemp -d)"
-  dpkg-deb -x "$NATIVE_DIR/cache/$DEB" "$WORK"
-  for f in "$LOADER" libc.so.6 libpthread.so.0 libdl.so.2 libm.so.6 libresolv.so.2; do
-    SRCF="$(find "$WORK" -name "$f" | head -1)"
-    [ -n "$SRCF" ] || die "glibc file missing from package: $f"
-    cp -L "$SRCF" "$LIBDIR/$f"
-  done
-  # never create libc.so here: 32-bit Termux binaries link bionic libc.so and
-  # LD search would pick this 64-bit glibc up with fatal results.
-  rm -f "$LIBDIR/libc.so"
-  if [ "$TARGET" = "linux-arm64" ]; then
-    for f in "$LIBDIR"/ld-* "$LIBDIR"/libc.so.6 "$LIBDIR"/libpthread.so.0 "$LIBDIR"/libdl.so.2 "$LIBDIR"/libm.so.6 "$LIBDIR"/libresolv.so.2; do
-      node "$NATIVE_DIR/patch-robust.mjs" "$f" || true
-    done
-    node "$NATIVE_DIR/patch-libc-syscall.mjs" "$LIBDIR/libc.so.6" \
-      || die "patching glibc syscall() failed; this glibc build is not supported yet"
-  fi
-  touch "$LIBDIR/.patched"
-  rm -rf "$WORK"
-  say "patched glibc set installed in $LIBDIR"
+if [ "$TARGET" = "linux-arm64" ]; then
+  # Deterministic: the prebuilt patched set ships in the repo as a bundle;
+  # every file is md5-verified after writing. No device extraction tools.
+  rm -rf "$LIBDIR"
+  node "$NATIVE_DIR/extract-libs.mjs" \
+    || die "glibc bundle verification failed; please report the output above"
+  DEB_ARCH="arm64"
 else
-  say "patched glibc set already present in $LIBDIR"
+  # Experimental x64 path: plain (unpatched) glibc set from the pinned deb.
+  DEB_ARCH="amd64"
+  DEB_SHA="$GLIBC_AMD64_SHA256"
+  DEB="libc6_${GLIBC_VERSION}_${DEB_ARCH}.deb"
+  if [ ! -f "$LIBDIR/.patched" ]; then
+    if [ ! -f "$NATIVE_DIR/cache/$DEB" ]; then
+      say "downloading glibc ($DEB) from Debian..."
+      curl -fsSL --retry 5 --retry-delay 3 -o "$NATIVE_DIR/cache/$DEB" "$GLIBC_MIRROR/$DEB"
+    fi
+    echo "$DEB_SHA  $NATIVE_DIR/cache/$DEB" | sha256sum -c - >/dev/null 2>&1 \
+      || die "glibc package checksum mismatch; please report this with your device details"
+    WORK="$(mktemp -d)"
+    dpkg-deb -x "$NATIVE_DIR/cache/$DEB" "$WORK"
+    for f in "$LOADER" libc.so.6 libpthread.so.0 libdl.so.2 libm.so.6 libresolv.so.2; do
+      SRCF="$(find "$WORK" -name "$f" | head -1)"
+      [ -n "$SRCF" ] || die "glibc file missing from package: $f"
+      cp -L "$SRCF" "$LIBDIR/$f"
+    done
+    rm -f "$LIBDIR/libc.so"
+    chmod 755 "$LIBDIR"/*
+    touch "$LIBDIR/.patched"
+    rm -rf "$WORK"
+    say "glibc set installed in $LIBDIR"
+  else
+    say "glibc set already present in $LIBDIR"
+  fi
 fi
 
 # --- verify the kernel can run 64-bit code (armv8l can be either) ---

@@ -6,9 +6,9 @@ import fs from "node:fs"
 import path from "node:path"
 import os from "node:os"
 import crypto from "node:crypto"
-import zlib from "node:zlib"
 import { execFileSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
+import { extractMembers } from "./untar.mjs"
 
 const DIR = path.dirname(fileURLToPath(import.meta.url))
 const CONF = path.join(os.homedir(), ".config", "manicode")
@@ -28,40 +28,6 @@ function curl(url, out) {
 }
 const sha256 = (f) => crypto.createHash("sha256").update(fs.readFileSync(f)).digest("hex")
 const md5 = (f) => crypto.createHash("md5").update(fs.readFileSync(f)).digest("hex")
-
-// Pure-node archive extraction (gunzip + minimal tar reader). Some devices
-// ship a tar that corrupts large members; this is byte-exact by construction
-// and removes the tool dependency entirely.
-function extractMembers(archivePath, outDir) {
-  const raw = zlib.gunzipSync(fs.readFileSync(archivePath))
-  let off = 0
-  let longName = null
-  const extracted = []
-  while (off + 512 <= raw.length) {
-    const hdr = raw.subarray(off, off + 512)
-    if (hdr.every((b) => b === 0)) break
-    let name = longName || hdr.subarray(0, 100).toString("latin1").replace(/\0[\s\S]*$/, "")
-    longName = null
-    const sizeStr = hdr.subarray(124, 136).toString("latin1").replace(/[\s\0]/g, "")
-    const size = parseInt(sizeStr, 8) || 0
-    const type = String.fromCharCode(hdr[156] || 0x30)
-    const dataStart = off + 512
-    if (type === "L") {
-      longName = raw.subarray(dataStart, dataStart + size).toString("latin1").replace(/\0[\s\S]*$/, "")
-    } else if (type === "x" || type === "g") {
-      // pax metadata records: skipped
-    } else if (type === "0" || type === "\0" || type === "7") {
-      const base = path.posix.basename(name.replace(/^\.\//, ""))
-      if (base === "freebuff" || base === "tree-sitter.wasm") {
-        fs.writeFileSync(path.join(outDir, base), raw.subarray(dataStart, dataStart + size))
-        extracted.push(base + " (" + size + " bytes, md5 " + md5(path.join(outDir, base)) + ")")
-      }
-    }
-    off = dataStart + Math.ceil(size / 512) * 512
-  }
-  if (!fs.existsSync(path.join(outDir, "freebuff"))) throw new Error("freebuff member not found in archive")
-  return extracted
-}
 
 const existing = path.join(CONF, "freebuff")
 if (fs.existsSync(existing) && fs.existsSync(MD5F)) {
@@ -110,10 +76,12 @@ if (sha256(archive) !== expected) {
 console.log("install-binary: archive verified (sha256 ok), extracting...")
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "freebuff-"))
-for (const line of extractMembers(archive, tmp)) {
-  console.log("install-binary: extracted " + line)
-}
+const extracted = extractMembers(archive, tmp, ["freebuff", "tree-sitter.wasm"])
 const bin = path.join(tmp, "freebuff")
+if (!fs.existsSync(bin)) throw new Error("freebuff member not found in archive")
+for (const name of extracted) {
+  console.log("install-binary: extracted " + name + " (" + fs.statSync(path.join(tmp, name)).size + " bytes, md5 " + md5(path.join(tmp, name)) + ")")
+}
 fs.chmodSync(bin, 0o755)
 
 // No patchelf anywhere: the launcher spawns the private loader directly,
