@@ -32,9 +32,9 @@ export FREEBUFF_NATIVE_HOOK="$DIR/hooks.js"
 # The terminal watchdog deadlocks TUI startup on Android; the launcher
 # still resets the terminal on exit without it.
 export CODEBUFF_NO_TERMINAL_WATCHDOG=1
-# Execute through the private loader with an explicit library path.
-export FREEBUFF_LOADER_PATH="$DIR/lib/@LOADER@"
-export FREEBUFF_LIB_DIR="$DIR/lib"
+# The binary is executed directly (with interpreter and rpath set by patchelf)
+# so that process.execPath points to the binary itself and internal child
+# processes (like the terminal command broker) can re-exec it.
 
 if ! (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null; then
   nohup node "$DIR/proxy.mjs" >/dev/null 2>&1 &
@@ -42,14 +42,14 @@ if ! (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null; then
 fi
 
 repatch() {
-  # No patchelf: the launcher spawns via the private loader (--library-path).
+  patchelf --set-interpreter "$DIR/lib/@LOADER@" --set-rpath "$DIR/lib" "$1" >&2 || true
   if [ "@TARGET@" != "linux-x64" ]; then
     node "$DIR/patch-syscalls.mjs" "$1" >&2 || true
   fi
 }
 verify() {
-  timeout 60 "$DIR/lib/@LOADER@" --library-path "$DIR/lib" "$1" --version >/dev/null 2>&1 \
-    && timeout 60 "$DIR/lib/@LOADER@" --library-path "$DIR/lib" "$1" --help >/dev/null 2>&1
+  timeout 60 "$1" --version </dev/null >/dev/null 2>&1 \
+    && timeout 60 "$1" --help </dev/null >/dev/null 2>&1
 }
 save_bak() {
   mkdir -p "$BAK" || return 0
@@ -83,7 +83,7 @@ if [ -f "$BIN" ]; then
     if verify "$BIN"; then
       save_bak
       recalc_md5 > "$MD5F"
-      echo "freebuff: $("$FREEBUFF_LOADER_PATH" --library-path "$DIR/lib" "$BIN" --version 2>/dev/null) ready (native, patched)" >&2
+      echo "freebuff: $("$BIN" --version 2>/dev/null) ready (native, patched)" >&2
     elif [ -f "$BAK/freebuff.bak" ]; then
       echo "freebuff: new binary failed verification; restoring last working copy" >&2
       restore_bak

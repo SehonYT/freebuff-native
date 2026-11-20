@@ -3,7 +3,7 @@
 // Restrict instruction scanning to executable ELF segments and leave data untouched.
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
-export const PATCH_VERSION = "explicit-enosys-v2";
+export const PATCH_VERSION = "explicit-enosys-v3";
 const NRS = new Set([99, 283, 291, 424, 434, 435, 436, 437, 438, 439, 440, 441]);
 const SVC = 0xd4000001;
 const RETURN_ENOSYS = 0x928004a0;

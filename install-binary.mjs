@@ -112,6 +112,7 @@ for (let attempt = 1; attempt <= 3; attempt++) {
   const backNeeded = neededList(back)
   console.log("install-binary: write attempt " + attempt + ": read-back md5 " + backMd5 + ", NEEDED " + (backNeeded || []).join(", "))
   if (backMd5 === groundTruth) {
+    sh("patchelf", ["--set-interpreter", LOADER, "--set-rpath", GLIBC, candidate])
     finalPath = candidate
     break
   }
@@ -123,11 +124,10 @@ if (!finalPath) {
   process.exit(1)
 }
 
-// final independent check: run the CLI through the private loader
+// final independent check: run the CLI directly (kernel executes interpreter)
 const verify = () => {
   try {
-    const execArgs = fs.existsSync(LOADER) ? [LOADER, "--library-path", GLIBC, finalPath] : [finalPath]
-    const go = (a) => execFileSync(execArgs[0], [...execArgs.slice(1), a], { stdio: "ignore", timeout: 60000, env: cleanEnv })
+    const go = (a) => execFileSync(finalPath, [a], { stdio: "ignore", timeout: 60000, env: cleanEnv })
     go("--version")
     go("--help")
     return true

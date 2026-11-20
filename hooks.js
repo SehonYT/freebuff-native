@@ -30,8 +30,7 @@ function run(cmd, args, opts) {
 
 function verify(bin) {
   try {
-    const execArgs = fs.existsSync(LOADER) ? [LOADER, "--library-path", GLIBC, bin] : [bin]
-    const go = (a) => execFileSync(execArgs[0], [...execArgs.slice(1), a],
+    const go = (a) => execFileSync(bin, [a],
       { stdio: 'ignore', timeout: 60000, env: CHILD_ENV })
     go("--version")
     go("--help")
@@ -52,8 +51,7 @@ function applyNativePatch(bin) {
       console.error('freebuff hook: patched glibc set missing at ' + GLIBC + '; run install.sh again')
       return false
     }
-    // No patchelf: the launcher spawns through the private loader
-    // (FREEBUFF_LOADER_PATH), which needs no interpreter or rpath rewrite.
+    run('patchelf', ['--set-interpreter', LOADER, '--set-rpath', GLIBC, bin])
     if (TARGET !== "linux-x64") {
       if (!run('node', [path.join(DIR, 'patch-syscalls.mjs'), bin])) return false
     }

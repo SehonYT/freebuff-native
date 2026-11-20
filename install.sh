@@ -70,14 +70,21 @@ say "platform: Termux ($UNAME_M), release target: $TARGET"
 
 # --- dependencies ---
 MISSING=""
-for t in node npm curl tar xz dpkg-deb; do
+for t in node npm curl tar xz dpkg-deb patchelf; do
   command -v "$t" >/dev/null 2>&1 || MISSING="$MISSING $t"
 done
 if [ -n "$MISSING" ]; then
   say "installing missing packages:$MISSING"
   pkg install -y nodejs-lts patchelf xz-utils binutils dpkg 2>/dev/null || pkg install -y nodejs patchelf xz-utils binutils dpkg
 fi
-for t in node npm curl tar xz dpkg-deb; do
+# Auto-heal Termux patchelf libc++ symbol mismatch if present
+if command -v patchelf >/dev/null 2>&1; then
+  if ! patchelf --version >/dev/null 2>&1; then
+    say "patchelf is broken on this device (Termux libc++ issue); running pkg upgrade..."
+    pkg upgrade -y patchelf libc++ 2>/dev/null || true
+  fi
+fi
+for t in node npm curl tar xz dpkg-deb patchelf; do
   command -v "$t" >/dev/null 2>&1 || die "missing dependency even after pkg install: $t"
 done
 
