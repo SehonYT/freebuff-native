@@ -11,6 +11,7 @@ proxy.log
 !runtime/linux-arm64-libs.tar.gz
 *.tgz
 *.deb
+shim-bin/
 # dev leftovers (root only; portable versions live in tools/)
 /freebuff
 /nohostsvc.*

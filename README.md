@@ -93,6 +93,16 @@ The wrapper disables it via the app's own switch
 (`CODEBUFF_NO_TERMINAL_WATCHDOG=1`); the npm launcher still resets the
 terminal on exit.
 
+### 5. Non-repo git diff socket deadlock after prompt
+When sending a prompt outside of a git repository (such as in `$HOME`), the
+CLI spawns `git diff --cached --name-only --` to check for modified files.
+Outside a git repo, git emits a multi-KB usage/error dump to stderr. The CLI
+spawns this with stdio attached to socketpairs but does not drain stderr
+while blocking on `wait4()`, causing git to fill the socket buffer and hang
+in `sock_alloc_send_pskb`. The wrapper prepends `tools/git-shim` to `PATH`,
+which immediately answers diff queries outside repositories with an empty
+result while passing all other git operations to real git untouched.
+
 ## Update safety
 
 The CLI self-updates: the official npm launcher downloads releases

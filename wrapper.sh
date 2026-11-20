@@ -23,6 +23,15 @@ command -v termux-open-url >/dev/null 2>&1 && export BROWSER="${BROWSER:-termux-
 # Bionic-oriented LD_* settings (termux-exec LD_PRELOAD etc.) poison glibc
 # processes: the preload chain drags in bionic libc.so and kills the loader.
 unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG LD_BIND_NOW
+# The CLI spawns git for repo scans with stdio on sockets it does not drain
+# while waiting for git; outside a repository git replies with a multi-KB
+# usage dump and deadlocks the UI. The shim answers those scans instantly.
+SHIM_BIN="$DIR/shim-bin"
+mkdir -p "$SHIM_BIN"
+cp -f "$DIR/tools/git-shim" "$SHIM_BIN/git" 2>/dev/null || true
+chmod 755 "$SHIM_BIN/git" 2>/dev/null || true
+export PATH="$SHIM_BIN:$PATH"
+export FREEBUFF_REAL_GIT="$(command -v git || echo $PREFIX/bin/git)"
 # npm reports android/arm (or aarch64) on Termux; we run the matching release.
 export CODEBUFF_BINARY_TARGET=@TARGET@
 # Lets the official launcher re-patch updates before it respawns them.
