@@ -32,9 +32,28 @@ export FREEBUFF_NATIVE_HOOK="$DIR/hooks.js"
 # The terminal watchdog deadlocks TUI startup on Android; the launcher
 # still resets the terminal on exit without it.
 export CODEBUFF_NO_TERMINAL_WATCHDOG=1
+# Use Termux's native ripgrep for code_search (vendored glibc rg fails on bionic)
+export CODEBUFF_RG_PATH="$(command -v rg || echo "$PREFIX/bin/rg")"
+ln -sf "$CODEBUFF_RG_PATH" "$CONF/rg" 2>/dev/null || true
 # The binary is executed directly (with interpreter and rpath set by patchelf)
 # so that process.execPath points to the binary itself and internal child
 # processes (like the terminal command broker) can re-exec it.
+
+# Handle manual update command directly
+if [ "${1:-}" = "update" ] || [ "${1:-}" = "patch-update" ] || [ "${1:-}" = "--update" ]; then
+  exec bash "$DIR/update.sh" --manual
+fi
+
+# Show notice if a background update completed previously
+if [ -f "$DIR/.update_notice" ]; then
+  cat "$DIR/.update_notice" >&2
+  rm -f "$DIR/.update_notice"
+fi
+
+# Trigger background check for patch updates (non-blocking, throttled to 6h)
+if [ "${FREEBUFF_AUTO_UPDATE:-1}" != "0" ] && [ -f "$DIR/update.sh" ]; then
+  nohup bash "$DIR/update.sh" --background >/dev/null 2>&1 &
+fi
 
 if ! (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null; then
   nohup node "$DIR/proxy.mjs" >/dev/null 2>&1 &

@@ -7,6 +7,8 @@ pkg/
 extract-test/
 freebuff.md5
 freebuff.patch-version
+.last_update_check
+.update_notice
 __pycache__/
 proxy.log
 *.tar.gz

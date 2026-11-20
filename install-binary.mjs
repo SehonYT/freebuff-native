@@ -149,6 +149,13 @@ if (!verify()) {
 }
 fs.renameSync(finalPath, existing)
 if (wasmBuf) fs.writeFileSync(path.join(CONF, "tree-sitter.wasm"), wasmBuf)
+const rgPath = process.env.CODEBUFF_RG_PATH || "/data/data/com.termux/files/usr/bin/rg"
+if (fs.existsSync(rgPath)) {
+  try {
+    fs.rmSync(path.join(CONF, "rg"), { force: true })
+    fs.symlinkSync(rgPath, path.join(CONF, "rg"))
+  } catch {}
+}
 fs.writeFileSync(path.join(CONF, "freebuff-metadata.json"), JSON.stringify({ version, target: TARGET }, null, 2))
 fs.mkdirSync(BAK, { recursive: true })
 fs.copyFileSync(existing, path.join(BAK, "freebuff.bak"))

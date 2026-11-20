@@ -70,12 +70,12 @@ say "platform: Termux ($UNAME_M), release target: $TARGET"
 
 # --- dependencies ---
 MISSING=""
-for t in node npm curl tar xz dpkg-deb patchelf; do
+for t in node npm curl tar xz dpkg-deb patchelf rg; do
   command -v "$t" >/dev/null 2>&1 || MISSING="$MISSING $t"
 done
 if [ -n "$MISSING" ]; then
   say "installing missing packages:$MISSING"
-  pkg install -y nodejs-lts patchelf xz-utils binutils dpkg 2>/dev/null || pkg install -y nodejs patchelf xz-utils binutils dpkg
+  pkg install -y nodejs-lts patchelf xz-utils binutils dpkg ripgrep 2>/dev/null || pkg install -y nodejs patchelf xz-utils binutils dpkg ripgrep
 fi
 # Auto-heal Termux patchelf libc++ symbol mismatch if present
 if command -v patchelf >/dev/null 2>&1; then
@@ -84,7 +84,7 @@ if command -v patchelf >/dev/null 2>&1; then
     pkg upgrade -y patchelf libc++ 2>/dev/null || true
   fi
 fi
-for t in node npm curl tar xz dpkg-deb patchelf; do
+for t in node npm curl tar xz dpkg-deb patchelf rg; do
   command -v "$t" >/dev/null 2>&1 || die "missing dependency even after pkg install: $t"
 done
 
@@ -157,6 +157,10 @@ node "$NATIVE_DIR/fix-launcher.mjs" || true
 
 # --- the binary itself (official release, patched for this device) ---
 node "$NATIVE_DIR/install-binary.mjs" || die "binary install/patch failed"
+
+# --- ripgrep setup for code_search ---
+mkdir -p "$HOME/.config/manicode"
+ln -sf "$PREFIX/bin/rg" "$HOME/.config/manicode/rg"
 
 # --- wrapper ---
 mkdir -p "$HOME/.local/bin"

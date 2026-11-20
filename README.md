@@ -107,6 +107,30 @@ from being modified. Git runs normally; no shim hides errors or changes
 exit codes. Re-running `install.sh` rebuilds older patched binaries from
 the cached verified archive using a patch-version marker.
 
+### 6. Code search (ripgrep) on Android
+Freebuff's SDK embeds a vendored glibc `rg` binary at `~/.config/manicode/rg`.
+On Android/Termux, this glibc binary fails with `cannot execute: required file not found` (exit 127).
+The project configures Freebuff via `CODEBUFF_RG_PATH` to use Termux's native,
+optimized `ripgrep` (`rg`), and symlinks `~/.config/manicode/rg` to it as well,
+enabling full code search functionality without errors.
+
+## Automatic patch & CLI updates
+
+### Automatic background checks
+When you launch `freebuff`, the wrapper starts a non-blocking background check
+for patch updates from GitHub (throttled to once every 6 hours, configurable via
+`FREEBUFF_UPDATE_INTERVAL=21600` in seconds, or disabled with `FREEBUFF_AUTO_UPDATE=0`).
+When a new commit is detected on GitHub, it quietly fast-forwards the repository
+and re-applies any updated patch logic. A notification is displayed on your next launch.
+
+### Manual update command
+You can also update both the patch and the CLI binary on demand at any time:
+```bash
+freebuff update
+```
+This checks for GitHub updates to the patch repository, pulls latest changes,
+verifies all components, and checks for official Freebuff CLI updates.
+
 ## Update safety
 
 The CLI self-updates: the official npm launcher downloads releases
@@ -124,6 +148,7 @@ backup plus an md5-triggered re-patch as a second line of defense.
 
 ```
 install.sh            one-liner installer / repair
+update.sh             manual & background patch updater from GitHub
 wrapper.sh            launcher template (installed to ~/.local/bin/freebuff)
 install-binary.mjs    fetch + verify + patch + install the CLI binary
 hooks.js              patch hook used by the official launcher on updates
