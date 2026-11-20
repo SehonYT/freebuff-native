@@ -29,6 +29,9 @@ function sh(cmd, args, opts = {}) {
 const sha256 = (f) => crypto.createHash("sha256").update(fs.readFileSync(f)).digest("hex")
 const md5buf = (b) => crypto.createHash("md5").update(b).digest("hex")
 const md5 = (f) => md5buf(fs.readFileSync(f))
+// Strip bionic-oriented LD_* vars (termux-exec LD_PRELOAD drags bionic
+// libc.so into the glibc loader with fatal results on some devices).
+const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("LD_")))
 
 const existing = path.join(CONF, "freebuff")
 if (fs.existsSync(existing) && fs.existsSync(MD5F)) {
@@ -138,7 +141,7 @@ fs.writeFileSync(MD5F, md5(finalPath))
 const verify = () => {
   try {
     const execArgs = fs.existsSync(LOADER) ? [LOADER, "--library-path", GLIBC, finalPath] : [finalPath]
-    const go = (a) => execFileSync(execArgs[0], [...execArgs.slice(1), a], { stdio: "ignore", timeout: 60000, env: process.env })
+    const go = (a) => execFileSync(execArgs[0], [...execArgs.slice(1), a], { stdio: "ignore", timeout: 60000, env: cleanEnv })
     go("--version")
     go("--help")
     return true
@@ -151,8 +154,8 @@ if (!verify()) {
     try { fn(); console.error("(exit 0)") }
     catch (e) { console.error("(exit " + (e.status ?? "?") + (e.signal ? " signal " + e.signal : "") + (e.code ? " code " + e.code : "") + ")") }
   }
-  show("loader --list", () => execFileSync(LOADER, ["--library-path", GLIBC, "--list", finalPath], { stdio: ["ignore", 1, 2], timeout: 60000 }))
-  show("loader exec --version", () => execFileSync(LOADER, ["--library-path", GLIBC, finalPath, "--version"], { stdio: ["ignore", 1, 2], timeout: 60000 }))
+  show("loader --list", () => execFileSync(LOADER, ["--library-path", GLIBC, "--list", finalPath], { stdio: ["ignore", 1, 2], timeout: 60000, env: cleanEnv }))
+  show("loader exec --version", () => execFileSync(LOADER, ["--library-path", GLIBC, finalPath, "--version"], { stdio: ["ignore", 1, 2], timeout: 60000, env: cleanEnv }))
   console.error("--- disk view now: md5 " + md5(finalPath) + " (memory image was " + groundTruth + "), NEEDED " + (neededList(fs.readFileSync(finalPath)) || []).join(", ") + " ---")
   console.error("install-binary: if the disk view matches but the loader view differs, the ROM page-cache/FS is altering reads; report the output above")
   process.exit(1)

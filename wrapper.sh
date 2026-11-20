@@ -20,6 +20,9 @@ if [ -f "$PREFIX/etc/tls/cert.pem" ]; then
   export SSL_CERT_DIR="$PREFIX/etc/tls"
 fi
 command -v termux-open-url >/dev/null 2>&1 && export BROWSER="${BROWSER:-termux-open-url}"
+# Bionic-oriented LD_* settings (termux-exec LD_PRELOAD etc.) poison glibc
+# processes: the preload chain drags in bionic libc.so and kills the loader.
+unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG LD_BIND_NOW
 # npm reports android/arm (or aarch64) on Termux; we run the matching release.
 export CODEBUFF_BINARY_TARGET=@TARGET@
 # Lets the official launcher re-patch updates before it respawns them.

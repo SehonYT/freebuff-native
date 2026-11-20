@@ -124,7 +124,7 @@ fi
 # --- verify the kernel can run 64-bit code (armv8l can be either) ---
 # ld.so with no executable argument prints its usage; any output at all means
 # the kernel executed the loader. A 32-bit-only kernel refuses the exec.
-if ! "$LIBDIR/$LOADER" --list 2>&1 | grep -q "ld.so"; then
+if ! env -u LD_PRELOAD -u LD_LIBRARY_PATH -u LD_AUDIT "$LIBDIR/$LOADER" --list 2>&1 | grep -q "ld.so"; then
   die "this kernel cannot execute ${DEB_ARCH} binaries (32-bit-only kernel?); native freebuff is not possible here"
 fi
 

@@ -17,7 +17,9 @@ const TARGET = process.env.CODEBUFF_BINARY_TARGET || "linux-arm64"
 const LOADER = TARGET === "linux-x64"
   ? path.join(GLIBC, "ld-linux-x86-64.so.2")
   : path.join(GLIBC, "ld-linux-aarch64.so.1")
-const CHILD_ENV = process.env // library resolution is explicit: --library-path
+// Strip bionic-oriented LD_* vars (termux-exec LD_PRELOAD drags bionic
+// libc.so into the glibc loader with fatal results on some devices).
+const CHILD_ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("LD_")))
 
 function run(cmd, args, opts) {
   try {

@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 // Re-apply the freebuff-native hooks into the freebuff npm launcher
 // (idempotent, upgrades older shapes):
-// 1. update hook: re-patch + verify each update install before commit,
-//    so failures roll back to the previous binary.
-// 2. loader-aware spawn: run the CLI through the private glibc loader, so
-//    no interpreter rewrite (patchelf) is required at all.
+// 1. update hook: re-patch + verify each update install before commit.
+// 2. loader-aware spawn with bionic LD_* stripped: runs the CLI through the
+//    private glibc loader, immune to termux-exec LD_PRELOAD poisoning.
 import fs from "node:fs"
 import path from "node:path"
 
@@ -49,34 +48,52 @@ if (!code.includes("FREEBUFF_NATIVE_HOOK")) {
   console.log("fix-launcher: update hook installed")
 }
 
-// --- hook 2: spawn through the private loader (--library-path form) ---
+// --- hook 2: spawn through the private loader, bionic LD_* stripped ---
 const SPAWN_ANCHOR = 'child = spawn(CONFIG.binaryPath, process.argv.slice(2), {'
 const SPAWN_NEW = [
   'const fbLoader = process.env.FREEBUFF_LOADER_PATH',
+  '      const fbLibDir = process.env.FREEBUFF_LIB_DIR',
+  '      // freebuff-native: strip bionic LD_* (termux-exec LD_PRELOAD drags',
+  '      // bionic libc.so into the glibc loader) before spawning.',
+  '      for (const fbK of Object.keys(process.env)) if (fbK.startsWith("LD_")) delete process.env[fbK]',
+  '      const fbArgs = fbLoader ? [fbLibDir ? "--library-path" : null, fbLibDir, CONFIG.binaryPath, ...process.argv.slice(2)].filter(Boolean) : process.argv.slice(2)',
+  '      child = spawn(fbLoader || CONFIG.binaryPath, fbArgs, {',
+].join('\n')
+const OLDER_SHAPES = [
+  [
+    'const fbLoader = process.env.FREEBUFF_LOADER_PATH',
     '      const fbLibDir = process.env.FREEBUFF_LIB_DIR',
     '      const fbArgs = fbLoader',
     '        ? [fbLibDir ? "--library-path" : null, fbLibDir, CONFIG.binaryPath, ...process.argv.slice(2)].filter(Boolean)',
     '        : process.argv.slice(2)',
-    '      child = spawn(fbLoader || CONFIG.binaryPath, fbArgs, {'
-].join('\n')
-const OLD_SHAPE = [
-  'const fbLoader = process.env.FREEBUFF_LOADER_PATH',
+    '      child = spawn(fbLoader || CONFIG.binaryPath, fbArgs, {',
+  ].join('\n')
+  ,
+  [
+    'const fbLoader = process.env.FREEBUFF_LOADER_PATH',
     '      const fbArgs = fbLoader ? [CONFIG.binaryPath, ...process.argv.slice(2)] : process.argv.slice(2)',
-    '      child = spawn(fbLoader || CONFIG.binaryPath, fbArgs, {'
-].join('\n')
-if (code.includes("--library-path, fbLibDir") || code.includes("fbLibDir")) {
-  // already the current shape
-} else if (code.includes(OLD_SHAPE)) {
-  code = code.replace(OLD_SHAPE, SPAWN_NEW)
-  changed = true
-  console.log("fix-launcher: loader-aware spawn upgraded to --library-path form")
-} else if (code.includes(SPAWN_ANCHOR)) {
-  code = code.replace(SPAWN_ANCHOR, SPAWN_NEW)
-  changed = true
-  console.log("fix-launcher: loader-aware spawn installed")
-} else {
-  console.error('fix-launcher: spawn anchor not found; launcher layout changed')
-  process.exit(1)
+    '      child = spawn(fbLoader || CONFIG.binaryPath, fbArgs, {',
+  ].join('\n')
+  ,
+]
+
+if (!code.includes('fbK.startsWith("LD_")')) {
+  for (const oldShape of OLDER_SHAPES) {
+    if (code.includes(oldShape)) {
+      code = code.replace(oldShape, SPAWN_ANCHOR)
+      console.log("fix-launcher: reverting older spawn shape for upgrade")
+      changed = true
+      break
+    }
+  }
+  if (code.includes(SPAWN_ANCHOR)) {
+    code = code.replace(SPAWN_ANCHOR, SPAWN_NEW)
+    changed = true
+    console.log("fix-launcher: loader-aware spawn installed (LD_* stripped)")
+  } else {
+    console.error('fix-launcher: spawn anchor not found; launcher layout changed')
+    process.exit(1)
+  }
 }
 
 if (changed) fs.writeFileSync(LAUNCHER, code)
