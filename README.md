@@ -115,6 +115,10 @@ time and never committed.
 
 ## Troubleshooting
 
+- `CANNOT LINK EXECUTABLE "patchelf" ... _ZNSt6__ndk113__hash_memory...`:
+  a broken Termux `patchelf`/`libc++` package pair. The installer now runs
+  in loader-exec mode and does not need patchelf at all; to fix the package
+  itself anyway: `pkg update && pkg upgrade -y libc++ patchelf`.
 - `Bad system call` after an update: re-run `install.sh`; if it persists,
   the release likely uses a new blocked syscall — please open an issue.
 - A future release requiring glibc newer than 2.31 will fail verification

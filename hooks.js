@@ -1,7 +1,7 @@
 // Native patch hook, invoked by the freebuff launcher right after every update
-// install. Re-applies patchelf + blocked-syscall rewrites and verifies the
-// binary before the launcher respawns it; returning false makes the launcher
-// roll the install back to the previous (still working) binary.
+// install. Re-applies the binary patch (patchelf when available + blocked-
+// syscall rewrites) and verifies before the launcher respawns; returning false
+// makes the launcher roll back to the previous (still working) binary.
 const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -17,21 +17,24 @@ const TARGET = process.env.CODEBUFF_BINARY_TARGET || "linux-arm64"
 const LOADER = TARGET === "linux-x64"
   ? path.join(GLIBC, "ld-linux-x86-64.so.2")
   : path.join(GLIBC, "ld-linux-aarch64.so.1")
+const CHILD_ENV = { ...process.env, LD_LIBRARY_PATH: GLIBC }
 
-function run(cmd, args) {
+function run(cmd, args, opts) {
   try {
-    execFileSync(cmd, args, { stdio: ['ignore', 'ignore', 'inherit'], timeout: 180000 })
+    execFileSync(cmd, args, { stdio: ['ignore', 'ignore', 'inherit'], timeout: 180000, ...opts })
     return true
   } catch (e) {
-    console.error('freebuff hook: ' + cmd + ' failed: ' + e.message)
     return false
   }
 }
 
 function verify(bin) {
   try {
-    execFileSync(bin, ['--version'], { stdio: 'ignore', timeout: 60000 })
-    execFileSync(bin, ['--help'], { stdio: 'ignore', timeout: 60000 })
+    const execArgs = fs.existsSync(LOADER) ? [LOADER, "--library-path", GLIBC, bin] : [bin]
+    const go = (a) => execFileSync(execArgs[0], [...execArgs.slice(1), a],
+      { stdio: 'ignore', timeout: 60000, env: CHILD_ENV })
+    go("--version")
+    go("--help")
     return true
   } catch (e) {
     console.error('freebuff hook: verification failed: ' + e.message)
@@ -49,7 +52,11 @@ function applyNativePatch(bin) {
       console.error('freebuff hook: patched glibc set missing at ' + GLIBC + '; run install.sh again')
       return false
     }
-    if (!run('patchelf', ['--set-interpreter', LOADER, '--set-rpath', GLIBC, bin])) return false
+    // Optional rewrite: makes direct exec work too; not required because the
+    // launcher spawns through the loader (FREEBUFF_LOADER_PATH).
+    if (!run('patchelf', ['--set-interpreter', LOADER, '--set-rpath', GLIBC, bin])) {
+      console.error('freebuff hook: patchelf unavailable/failed; using loader-exec mode')
+    }
     if (TARGET !== "linux-x64") {
       if (!run('node', [path.join(DIR, 'patch-syscalls.mjs'), bin])) return false
     }

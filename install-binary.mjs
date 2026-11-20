@@ -83,15 +83,22 @@ if (!fs.existsSync(bin)) {
 }
 fs.chmodSync(bin, 0o755)
 
-sh("patchelf", ["--set-interpreter", LOADER, "--set-rpath", GLIBC, bin])
+try {
+  sh("patchelf", ["--set-interpreter", LOADER, "--set-rpath", GLIBC, bin])
+} catch (e) {
+  console.log("install-binary: patchelf unavailable (fine: loader-exec mode)")
+}
 if (TARGET !== "linux-x64") {
   sh("node", [path.join(DIR, "patch-syscalls.mjs"), bin])
 }
 
 const verify = () => {
   try {
-    execFileSync(bin, ["--version"], { stdio: "ignore", timeout: 60000 })
-    execFileSync(bin, ["--help"], { stdio: "ignore", timeout: 60000 })
+    const execArgs = fs.existsSync(LOADER) ? [LOADER, "--library-path", GLIBC, bin] : [bin]
+    const go = (a) => execFileSync(execArgs[0], [...execArgs.slice(1), a],
+      { stdio: "ignore", timeout: 60000, env: { ...process.env, LD_LIBRARY_PATH: GLIBC } })
+    go("--version")
+    go("--help")
     return true
   } catch { return false }
 }

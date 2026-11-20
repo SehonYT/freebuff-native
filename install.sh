@@ -70,16 +70,29 @@ say "platform: Termux ($UNAME_M), release target: $TARGET"
 
 # --- dependencies ---
 MISSING=""
-for t in node npm curl tar patchelf xz dpkg-deb; do
+for t in node npm curl tar xz dpkg-deb; do
   command -v "$t" >/dev/null 2>&1 || MISSING="$MISSING $t"
 done
 if [ -n "$MISSING" ]; then
   say "installing missing packages:$MISSING"
   pkg install -y nodejs-lts patchelf xz-utils binutils dpkg 2>/dev/null || pkg install -y nodejs patchelf xz-utils binutils dpkg
 fi
-for t in node npm curl tar patchelf xz dpkg-deb; do
+for t in node npm curl tar xz dpkg-deb; do
   command -v "$t" >/dev/null 2>&1 || die "missing dependency even after pkg install: $t"
 done
+
+# patchelf is optional (the launcher spawns the private loader directly),
+# but broken installs on Termux (libc++ mismatch) are common, so test it.
+if command -v patchelf >/dev/null 2>&1; then
+  if ! patchelf --version >/dev/null 2>&1; then
+    say "patchelf is installed but broken (known Termux libc++ issue); trying an upgrade..."
+    pkg upgrade -y patchelf libc++ >/dev/null 2>&1 || true
+    patchelf --version >/dev/null 2>&1 || say "patchelf still broken; continuing in loader-exec mode (fully supported)"
+  fi
+else
+  pkg install -y patchelf >/dev/null 2>&1 || true
+  patchelf --version >/dev/null 2>&1 || say "patchelf unavailable; continuing in loader-exec mode (fully supported)"
+fi
 
 # --- patched glibc set ---
 LIBDIR="$NATIVE_DIR/lib"
