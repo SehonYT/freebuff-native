@@ -103,7 +103,26 @@ const verify = () => {
   } catch { return false }
 }
 if (!verify()) {
-  console.error("install-binary: patched binary failed verification on this device")
+  console.error("install-binary: patched binary failed verification on this device; diagnostics:")
+  const diagEnv = { ...process.env, LD_LIBRARY_PATH: GLIBC }
+  const show = (label, fn) => {
+    console.error("--- " + label + " ---")
+    try {
+      fn()
+      console.error("(exit 0)")
+    } catch (e) {
+      console.error("(exit " + (e.status !== undefined ? e.status : "?") + (e.signal ? " signal " + e.signal : "") + ")")
+    }
+  }
+  if (fs.existsSync(LOADER)) {
+    show("loader --list " + bin, () => execFileSync(LOADER, ["--library-path", GLIBC, "--list", bin], { stdio: ["ignore", 1, 2], timeout: 60000, env: diagEnv }))
+    show("loader exec --version", () => execFileSync(LOADER, ["--library-path", GLIBC, bin, "--version"], { stdio: ["ignore", 1, 2], timeout: 60000, env: diagEnv }))
+    show("direct exec --version", () => execFileSync(bin, ["--version"], { stdio: ["ignore", 1, 2], timeout: 60000, env: diagEnv }))
+  } else {
+    show("direct exec --version", () => execFileSync(bin, ["--version"], { stdio: ["ignore", 1, 2], timeout: 60000 }))
+  }
+  console.error("--- uname: " + execFileSync("uname", ["-a"], { stdio: ["ignore", "pipe", "pipe"] }).toString().trim())
+  console.error("install-binary: please open an issue with the output above")
   process.exit(1)
 }
 

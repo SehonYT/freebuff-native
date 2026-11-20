@@ -141,11 +141,15 @@ fi
 
 # --- official npm launcher package (npm refuses android/arm) ---
 LAUNCHER_DIR="$PREFIX/lib/node_modules/freebuff"
-if [ ! -f "$LAUNCHER_DIR/index.js" ]; then
+mkdir -p "$NATIVE_DIR/cache"
+curl -fsSL --max-time 60 https://registry.npmjs.org/freebuff/latest -o "$NATIVE_DIR/cache/freebuff-latest.json"
+LATEST_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$NATIVE_DIR/cache/freebuff-latest.json" | head -1)"
+INSTALLED_VER="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$LAUNCHER_DIR/package.json" 2>/dev/null | head -1)"
+say "launcher package: installed=${INSTALLED_VER:-none} latest=$LATEST_VER"
+if [ "$INSTALLED_VER" != "$LATEST_VER" ] || [ ! -f "$LAUNCHER_DIR/index.js" ]; then
   say "installing the freebuff npm launcher package (npm blocks android/arm, doing it manually)..."
-  mkdir -p "$NATIVE_DIR/cache"
-  curl -fsSL --max-time 60 https://registry.npmjs.org/freebuff/latest -o "$NATIVE_DIR/cache/freebuff-latest.json"
-  VER="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$NATIVE_DIR/cache/freebuff-latest.json" | head -1)"
+  rm -rf "$LAUNCHER_DIR"
+  VER="$LATEST_VER"
   [ -n "$VER" ] || die "cannot resolve latest freebuff version from npm"
   curl -fsSL --retry 3 -o "$NATIVE_DIR/cache/freebuff-npm.tgz" "https://registry.npmjs.org/freebuff/-/freebuff-$VER.tgz"
   mkdir -p "$LAUNCHER_DIR"
