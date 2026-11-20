@@ -6,6 +6,8 @@ pristine/
 pkg/
 extract-test/
 freebuff.md5
+freebuff.patch-version
+__pycache__/
 proxy.log
 *.tar.gz
 !runtime/linux-arm64-libs.tar.gz

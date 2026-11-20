@@ -10,13 +10,14 @@ import crypto from "node:crypto"
 import { execFileSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { extractMembersToBuffers } from "./untar.mjs"
-import { patchBuffer } from "./patch-syscalls.mjs"
+import { patchBuffer, PATCH_VERSION } from "./patch-syscalls.mjs"
 import { neededList } from "./elf.mjs"
 
 const DIR = path.dirname(fileURLToPath(import.meta.url))
 const CONF = path.join(os.homedir(), ".config", "manicode")
 const BAK = path.join(DIR, "bak")
 const MD5F = path.join(DIR, "freebuff.md5")
+const PATCHF = path.join(DIR, "freebuff.patch-version")
 const CACHE = path.join(DIR, "cache")
 const TARGET = process.env.CODEBUFF_BINARY_TARGET || "linux-arm64"
 const GLIBC = path.join(DIR, "lib")
@@ -34,8 +35,8 @@ const md5 = (f) => md5buf(fs.readFileSync(f))
 const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("LD_")))
 
 const existing = path.join(CONF, "freebuff")
-if (fs.existsSync(existing) && fs.existsSync(MD5F)) {
-  if (md5(existing) === fs.readFileSync(MD5F, "utf8").trim()) {
+if (fs.existsSync(existing) && fs.existsSync(MD5F) && fs.existsSync(PATCHF)) {
+  if (fs.readFileSync(PATCHF, "utf8").trim() === PATCH_VERSION && md5(existing) === fs.readFileSync(MD5F, "utf8").trim()) {
     console.log("install-binary: already installed and patched (" + TARGET + ")")
     process.exit(0)
   }
@@ -111,31 +112,16 @@ for (let attempt = 1; attempt <= 3; attempt++) {
   const backNeeded = neededList(back)
   console.log("install-binary: write attempt " + attempt + ": read-back md5 " + backMd5 + ", NEEDED " + (backNeeded || []).join(", "))
   if (backMd5 === groundTruth) {
-    fs.renameSync(candidate, existing)
-    finalPath = existing
+    finalPath = candidate
     break
   }
-  console.error("install-binary: read-back differs from the memory image; storage layer fault, retrying on a fresh inode")
+  console.error("install-binary: read-back verification failed; retrying on a fresh inode")
   fs.rmSync(candidate, { force: true })
 }
 if (!finalPath) {
-  console.error("install-binary: could not write a verifiable binary; the device filesystem returns altered data on read-back. This is a kernel/ROM fault; please report the output above.")
+  console.error("install-binary: binary write verification failed; existing install left unchanged")
   process.exit(1)
 }
-
-if (wasmBuf) {
-  const wasmTruth = md5buf(wasmBuf)
-  fs.writeFileSync(path.join(CONF, "tree-sitter.wasm"), wasmBuf)
-  if (md5(path.join(CONF, "tree-sitter.wasm")) !== wasmTruth) console.error("install-binary: WARNING tree-sitter.wasm read-back mismatch")
-}
-fs.writeFileSync(path.join(CONF, "freebuff-metadata.json"), JSON.stringify({ version, target: TARGET }, null, 2))
-
-fs.mkdirSync(BAK, { recursive: true })
-fs.copyFileSync(finalPath, path.join(BAK, "freebuff.bak"))
-for (const name of ["freebuff-metadata.json", "tree-sitter.wasm"]) {
-  try { fs.copyFileSync(path.join(CONF, name), path.join(BAK, name)) } catch {}
-}
-fs.writeFileSync(MD5F, md5(finalPath))
 
 // final independent check: run the CLI through the private loader
 const verify = () => {
@@ -157,7 +143,18 @@ if (!verify()) {
   show("loader --list", () => execFileSync(LOADER, ["--library-path", GLIBC, "--list", finalPath], { stdio: ["ignore", 1, 2], timeout: 60000, env: cleanEnv }))
   show("loader exec --version", () => execFileSync(LOADER, ["--library-path", GLIBC, finalPath, "--version"], { stdio: ["ignore", 1, 2], timeout: 60000, env: cleanEnv }))
   console.error("--- disk view now: md5 " + md5(finalPath) + " (memory image was " + groundTruth + "), NEEDED " + (neededList(fs.readFileSync(finalPath)) || []).join(", ") + " ---")
-  console.error("install-binary: if the disk view matches but the loader view differs, the ROM page-cache/FS is altering reads; report the output above")
+  console.error("install-binary: candidate rejected; the installed binary and backup were left unchanged")
+  fs.rmSync(finalPath, { force: true })
   process.exit(1)
 }
+fs.renameSync(finalPath, existing)
+if (wasmBuf) fs.writeFileSync(path.join(CONF, "tree-sitter.wasm"), wasmBuf)
+fs.writeFileSync(path.join(CONF, "freebuff-metadata.json"), JSON.stringify({ version, target: TARGET }, null, 2))
+fs.mkdirSync(BAK, { recursive: true })
+fs.copyFileSync(existing, path.join(BAK, "freebuff.bak"))
+for (const name of ["freebuff-metadata.json", "tree-sitter.wasm"]) {
+  if (fs.existsSync(path.join(CONF, name))) fs.copyFileSync(path.join(CONF, name), path.join(BAK, name))
+}
+fs.writeFileSync(MD5F, md5(existing))
+fs.writeFileSync(PATCHF, PATCH_VERSION + "\n")
 console.log("install-binary: freebuff " + version + " (" + TARGET + ") installed, patched and verified")

@@ -23,15 +23,8 @@ command -v termux-open-url >/dev/null 2>&1 && export BROWSER="${BROWSER:-termux-
 # Bionic-oriented LD_* settings (termux-exec LD_PRELOAD etc.) poison glibc
 # processes: the preload chain drags in bionic libc.so and kills the loader.
 unset LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG LD_BIND_NOW
-# The CLI spawns git for repo scans with stdio on sockets it does not drain
-# while waiting for git; outside a repository git replies with a multi-KB
-# usage dump and deadlocks the UI. The shim answers those scans instantly.
-SHIM_BIN="$DIR/shim-bin"
-mkdir -p "$SHIM_BIN"
-cp -f "$DIR/tools/git-shim" "$SHIM_BIN/git" 2>/dev/null || true
-chmod 755 "$SHIM_BIN/git" 2>/dev/null || true
-export PATH="$SHIM_BIN:$PATH"
-export FREEBUFF_REAL_GIT="$(command -v git || echo $PREFIX/bin/git)"
+# Preserve the real Git command and its output; subprocess fallbacks are
+# repaired in the syscall patch, not by hiding Git errors.
 # npm reports android/arm (or aarch64) on Termux; we run the matching release.
 export CODEBUFF_BINARY_TARGET=@TARGET@
 # Lets the official launcher re-patch updates before it respawns them.
@@ -39,8 +32,7 @@ export FREEBUFF_NATIVE_HOOK="$DIR/hooks.js"
 # The terminal watchdog deadlocks TUI startup on Android; the launcher
 # still resets the terminal on exit without it.
 export CODEBUFF_NO_TERMINAL_WATCHDOG=1
-# The launcher spawns the private loader directly (no interpreter rewrite
-# needed, patchelf optional) and libraries resolve through the private set.
+# Execute through the private loader with an explicit library path.
 export FREEBUFF_LOADER_PATH="$DIR/lib/@LOADER@"
 export FREEBUFF_LIB_DIR="$DIR/lib"
 
@@ -91,7 +83,7 @@ if [ -f "$BIN" ]; then
     if verify "$BIN"; then
       save_bak
       recalc_md5 > "$MD5F"
-      echo "freebuff: $("$BIN" --version 2>/dev/null) ready (native, patched)" >&2
+      echo "freebuff: $("$FREEBUFF_LOADER_PATH" --library-path "$DIR/lib" "$BIN" --version 2>/dev/null) ready (native, patched)" >&2
     elif [ -f "$BAK/freebuff.bak" ]; then
       echo "freebuff: new binary failed verification; restoring last working copy" >&2
       restore_bak

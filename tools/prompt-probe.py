@@ -1,84 +1,111 @@
-#!/usr/bin/env python
-# Reproduce the after-prompt freeze: start the TUI in a pty, type a prompt,
-# then sample the CLI process state, children, and proxy log.
-import os, pty, select, sys, time, json
-
-PROXY_LOG = os.path.expanduser("~/freebuff-native/proxy.log")
+#!/usr/bin/env python3
+import argparse, errno, fcntl, json, os, pty, re, select, signal, struct, sys, termios, time
+p = argparse.ArgumentParser()
+p.add_argument('--cwd', default=os.getcwd())
+p.add_argument('--timeout', type=float, default=75)
+p.add_argument('--output')
+p.add_argument('--expect', default='4167')
+p.add_argument('--prompt', default='Calculate 1789 plus 2378. Reply only with the resulting integer.')
+p.add_argument('command', nargs='*')
+a = p.parse_args()
+cmd = a.command or [os.path.expanduser('~/.local/bin/freebuff'), '--cwd', a.cwd]
 pid, fd = pty.fork()
 if pid == 0:
-    os.environ.setdefault("TERM", "xterm-256color")
-    os.execv("/data/data/com.termux/files/usr/bin/bash", ["bash", "-c", "exec /data/data/com.termux/files/home/.local/bin/freebuff"])
-
-buf = b""
+    os.chdir(a.cwd)
+    os.environ['TERM'] = 'xterm-256color'
+    fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 100, 0, 0))
+    os.execvp(cmd[0], cmd)
+fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 100, 0, 0))
+os.set_blocking(fd, False)
+start = time.monotonic()
+raw = bytearray()
 replied = set()
-start = time.time()
-
-def readfile(p):
+typed = None
+submitted = None
+next_sample = start + 20
+completed = False
+status = None
+def own_pids():
+    result = []
+    for s in os.listdir('/proc'):
+        if s.isdigit():
+            try:
+                if os.getsid(int(s)) == pid: result.append(int(s))
+            except (ProcessLookupError, PermissionError): pass
+    return result
+def rf(path):
     try:
-        with open(p) as fh: return fh.read().strip()
-    except Exception: return "?"
-
-def find_cli_pids():
-    out = []
-    for d in os.listdir("/proc"):
-        if not d.isdigit(): continue
+        with open(path) as f: return f.read().strip()
+    except OSError: return '?'
+def sample():
+    rows = []
+    for n in own_pids():
+        rows.append({'pid': n, 'cmd': rf('/proc/%d/cmdline' % n).replace('\x00', ' ')[:150], 'syscall': rf('/proc/%d/syscall' % n), 'wchan': rf('/proc/%d/wchan' % n)})
+    print(json.dumps({'seconds': round(time.monotonic()-start, 1), 'processes': rows}), file=sys.stderr, flush=True)
+try:
+    while time.monotonic()-start < a.timeout:
+        ready, _, _ = select.select([fd], [], [], 0.1)
+        if ready:
+            try: data = os.read(fd, 65536)
+            except OSError as e:
+                if e.errno == errno.EIO: break
+                if e.errno == errno.EAGAIN: continue
+                raise
+            if not data: break
+            raw.extend(data)
+            tail = bytes(raw[-2048:])
+            queries = [(b'\x1b]11;?', b'\x1b]11;rgb:2828/2828/2828\x1b\\'), (b'\x1b[c', b'\x1b[?62;22c'), (b'\x1b[6n', b'\x1b[1;1R')]
+            for q, r in queries:
+                if q in tail and q not in replied:
+                    replied.add(q)
+                    os.write(fd, r)
+        now = time.monotonic()
+        if typed is None and now-start > 12 and b'Enter a coding task' in raw:
+            os.write(fd, a.prompt.encode())
+            typed = now
+            print('prompt typed', file=sys.stderr, flush=True)
+        if typed is not None and submitted is None and now-typed > 0.4:
+            os.write(fd, b'\r')
+            submitted = now
+            print('prompt submitted', file=sys.stderr, flush=True)
+        if submitted is not None and a.expect.encode() in raw and now-submitted > 1:
+            completed = True
+            break
+        if now >= next_sample:
+            sample()
+            next_sample = now + 20
+        done, state = os.waitpid(pid, os.WNOHANG)
+        if done:
+            status = state
+            break
+    sample()
+finally:
+    for n in sorted(own_pids(), reverse=True):
+        try: os.kill(n, signal.SIGTERM)
+        except ProcessLookupError: pass
+    end = time.monotonic() + 2
+    while status is None and time.monotonic() < end:
+        ready, _, _ = select.select([fd], [], [], 0.1)
+        if ready:
+            try:
+                extra = os.read(fd, 65536)
+                if extra: raw.extend(extra)
+            except OSError: pass
         try:
-            with open("/proc/%s/cmdline" % d, "rb") as fh: cmd = fh.read().decode("latin1")
-        except Exception: continue
-        if "manicode/freebuff" in cmd and "bash" not in cmd:
-            out.append(d)
-    return out
-
-def sample(label):
-    lines = ["[%s] t=%.1fs" % (label, time.time() - start)]
-    for p in find_cli_pids():
-        kids = []
-        try:
-            for t in os.listdir("/proc/%s/task" % p):
-                with open("/proc/%s/task/%s/children" % (p, t)) as fh: kids += fh.read().split()
-        except Exception: pass
-        kidinfo = []
-        for k in kids[:4]:
-            kidinfo.append(readfile("/proc/%s/cmdline" % k).replace("\x00", " ")[:60])
-        lines.append("  cli[%s] syscall=%s wchan=%s threads=%s" % (p,
-            readfile("/proc/%s/syscall" % p), readfile("/proc/%s/wchan" % p),
-            len(os.listdir("/proc/%s/task" % p)) if os.path.isdir("/proc/%s/task" % p) else "?"))
-        if kidinfo: lines.append("    children: " + " | ".join(kidinfo))
-    try:
-        with open(PROXY_LOG) as fh: plines = fh.read().strip().split("\n")
-        lines.append("  proxy log (%d lines):" % len(plines))
-        for l in plines[-8:]: lines.append("    " + l)
-    except Exception: lines.append("  no proxy log")
-    print("\n".join(lines), file=sys.stderr)
-
-prompted = False
-deadline = start + 75
-while time.time() < deadline:
-    r, _, _ = select.select([fd], [], [], 1.0)
-    if fd in r:
-        try: data = os.read(fd, 65536)
-        except OSError: break
-        if not data: break
-        buf += data
-        if b"\x1b]11;?" in buf and "osc" not in replied:
-            replied.add("osc"); os.write(fd, b"\x1b]11;rgb:2828/2828/2828\x1b\\")
-        if b"\x1b[c" in buf and "da" not in replied:
-            replied.add("da"); os.write(fd, b"\x1b[?62;22c")
-        if b"\x1b[?u" in buf and "kk" not in replied:
-            replied.add("kk"); os.write(fd, b"\x1b[?0u")
-    if not prompted and time.time() - start > 12 and len(buf) > 2000:
-        prompted = True
-        os.write(fd, b"Reply with exactly: PROBE OK")
-        time.sleep(0.5)
-        os.write(fd, b"\r")
-        print("[probe] prompt submitted at t=12s", file=sys.stderr)
-        time.sleep(5)
-        sample("after-prompt+5s")
-        time.sleep(15)
-        sample("after-prompt+20s")
-        time.sleep(15)
-        sample("after-prompt+35s")
-        break
-
-print("[probe] total captured: %d bytes" % len(buf), file=sys.stderr)
-sys.stdout.buffer.write(buf[-6000:])
+            done, state = os.waitpid(pid, os.WNOHANG)
+            if done: status = state
+        except ChildProcessError: break
+    for n in own_pids():
+        try: os.kill(n, signal.SIGKILL)
+        except ProcessLookupError: pass
+    if status is None:
+        try: os.waitpid(pid, 0)
+        except ChildProcessError: pass
+    os.close(fd)
+if a.output:
+    with open(a.output, 'wb') as f: f.write(raw)
+text = re.sub(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)', '', raw.decode('utf8', 'replace'))
+text = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '\n', text)
+print(json.dumps({'prompt_submitted': submitted is not None, 'completed': completed, 'bytes': len(raw), 'elapsed_seconds': round(time.monotonic()-start, 1)}))
+print(text[-4500:])
+sys.exit(0 if completed else 1)

@@ -56,11 +56,10 @@ interpreter and rpath entirely — no patchelf, no ELF rewriting. This works
 identically on 32-bit-userland devices (armv8l): the arm64 kernel executes
 the loader natively regardless of the shell's bitness.
 
-Nothing runtime-critical is extracted by device tools anymore: some ROMs
-corrupt large extractions (observed: a sha-verified archive extracted into
-a mutated binary via the device tar, and a corrupted loader via dpkg-deb).
-Archives are unpacked in pure Node, and the glibc set is written from the
-committed bundle with checksum verification.
+Release archives are unpacked in Node and the runtime bundle is verified
+per file. Earlier reports of extraction or ROM corruption were incorrect:
+the `libc.so` error was caused by inherited Termux `LD_PRELOAD`. The wrapper
+and launcher remove `LD_*` settings before starting the glibc process.
 
 ### 2. Android app seccomp raises SIGSYS instead of ENOSYS
 For arm64 syscall numbers the sandbox filter does not know, the process is
@@ -93,15 +92,20 @@ The wrapper disables it via the app's own switch
 (`CODEBUFF_NO_TERMINAL_WATCHDOG=1`); the npm launcher still resets the
 terminal on exit.
 
-### 5. Non-repo git diff socket deadlock after prompt
-When sending a prompt outside of a git repository (such as in `$HOME`), the
-CLI spawns `git diff --cached --name-only --` to check for modified files.
-Outside a git repo, git emits a multi-KB usage/error dump to stderr. The CLI
-spawns this with stdio attached to socketpairs but does not drain stderr
-while blocking on `wait4()`, causing git to fill the socket buffer and hang
-in `sock_alloc_send_pskb`. The wrapper prepends `tools/git-shim` to `PATH`,
-which immediately answers diff queries outside repositories with an empty
-result while passing all other git operations to real git untouched.
+### 5. Correct syscall error handling during subprocess startup
+The first patch substituted syscall number zero for unsupported syscalls.
+On AArch64, zero is `io_setup`, not an ENOSYS stub: `pidfd_open` probes can
+receive the wrong error, causing Bun to synchronously reap a newly spawned
+child before its output readers attach. A child writing to stderr can then
+block the entire CLI.
+
+The corrected patch replaces the actual `svc #0` with `mov x0, #-38`
+(raw `-ENOSYS`), while retaining the original syscall-number instruction.
+It only scans executable ELF segments and stops if x8 is overwritten.
+This also prevents file-open flags that happen to equal syscall numbers
+from being modified. Git runs normally; no shim hides errors or changes
+exit codes. Re-running `install.sh` rebuilds older patched binaries from
+the cached verified archive using a patch-version marker.
 
 ## Update safety
 
@@ -136,10 +140,11 @@ time and never committed.
 
 ## Troubleshooting
 
-- A broken `patchelf` on your device (`CANNOT LINK EXECUTABLE` or a
-  `libc.so: cannot open shared object file` failure) is harmless now: the
-  pipeline never invokes patchelf. If you saw that error, update the project
-  (`git fetch && git reset --hard origin/main`) and re-run `install.sh`.
+- The pipeline does not require patchelf. A `libc.so` loading error is usually
+  an inherited bionic `LD_PRELOAD`; use the generated `freebuff` command,
+  which cleans the loader environment, rather than launching the ELF by hand.
+- To repair an existing installation without deleting sign-in state:
+  `git pull --ff-only && bash install.sh` from the project clone.
 - `Bad system call` after an update: re-run `install.sh`; if it persists,
   the release likely uses a new blocked syscall — please open an issue.
 - A future release requiring glibc newer than 2.31 will fail verification
@@ -153,7 +158,7 @@ MIT — see [LICENSE](LICENSE).
 
 The `runtime/` bundle contains unmodified and patched files from Debian's
 `libc6_2.31-13+deb11u11_arm64.deb` (LGPL-2.1+). It is committed so installs
-are deterministic on devices with flaky extraction tools. Reproduce it
+use a verified, reproducible runtime set. Reproduce it
 byte-for-byte: download the pinned .deb (URL and checksum in `install.sh`),
 extract, then run `patch-robust.mjs` over the lib set and
 `patch-libc-syscall.mjs` on `libc.so.6` — the same scripts that built it.

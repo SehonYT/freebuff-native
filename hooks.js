@@ -1,7 +1,5 @@
-// Native patch hook, invoked by the freebuff launcher right after every update
-// install. Re-applies the binary patch (patchelf when available + blocked-
-// syscall rewrites) and verifies before the launcher respawns; returning false
-// makes the launcher roll back to the previous (still working) binary.
+// Patch and verify every staged update before the launcher commits it.
+// A false return preserves the prior working binary through launcher rollback.
 const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
