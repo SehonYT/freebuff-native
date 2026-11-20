@@ -8,6 +8,7 @@ extract-test/
 freebuff.md5
 proxy.log
 *.tar.gz
+!runtime/linux-arm64-libs.tar.gz
 *.tgz
 *.deb
 # dev leftovers (root only; portable versions live in tools/)
