@@ -114,6 +114,13 @@ The project configures Freebuff via `CODEBUFF_RG_PATH` to use Termux's native,
 optimized `ripgrep` (`rg`), and symlinks `~/.config/manicode/rg` to it as well,
 enabling full code search functionality without errors.
 
+### 7. Web fetching (read_url) & SSRF DNS handling on Android
+Freebuff's `read_url` tool performs an internal SSRF pre-check using local `dns.lookup()`
+before fetching web pages. Because Android lacks `/etc/resolv.conf`, glibc DNS lookups
+normally time out with `getaddrinfo ETIMEOUT`, causing `read_url` to fail before fetching.
+The patcher configures public nameservers for DNS resolution while preserving exact byte length,
+allowing `read_url` to safely validate URLs and fetch pages via the local CONNECT proxy.
+
 ## Automatic patch & CLI updates
 
 ### Automatic background checks

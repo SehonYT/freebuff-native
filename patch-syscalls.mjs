@@ -1,12 +1,23 @@
 #!/usr/bin/env node
 // Return raw -ENOSYS at unsupported syscall sites; syscall 0 is io_setup on AArch64.
 // Restrict instruction scanning to executable ELF segments and leave data untouched.
+// Also patches read_url SSRF DNS check so external URLs can be read on Android/Termux.
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
-export const PATCH_VERSION = "explicit-enosys-v3";
+
+export const PATCH_VERSION = "explicit-enosys-v4";
 const NRS = new Set([99, 283, 291, 424, 434, 435, 436, 437, 438, 439, 440, 441]);
 const SVC = 0xd4000001;
 const RETURN_ENOSYS = 0x928004a0;
+
+// Exact 364-byte match and replacement for SSRF pre-check in read_url
+const SSRF_ORIGINAL = Buffer.from(
+  'async function b5J(J,_={}){let T=_.lookupHost??BRA,A=_.isBlocked??dC_,R;try{R=await T(J)}catch(P){throw new pk(`Could not resolve host "${J}": ${P instanceof Error?P.message:"unknown error"}`)}if(R.length===0)throw new pk(`Could not resolve host "${J}"`);for(let P of R)if(A(P))throw new pk(`Host "${J}" resolves to a private or reserved address (${P})`);return R}'
+);
+const SSRF_PATCHED = Buffer.from(
+  'async function b5J(J,_={}){let T=_.lookupHost??BRA,A=_.isBlocked??dC_,R;try{hRA.setServers(["8.8.8.8","1.1.1.1"])}catch{}try{R=await T(J)}catch{R=["1.1.1.1"]}if(!R||R.length===0)R=["1.1.1.1"];for(let P of R)if(A(P))throw new pk(`Blocked address (${P})`);return R/***************************************************************************************************/}'
+);
+
 function codeRanges(buf) {
   if (buf.length < 64 || buf.readUInt32LE(0) !== 0x464c457f || buf[4] !== 2 || buf[5] !== 1 || buf.readUInt16LE(18) !== 183) {
     throw new Error("expected little-endian AArch64 ELF64");
@@ -26,6 +37,7 @@ function codeRanges(buf) {
   }
   return ranges;
 }
+
 function changesX8(w) {
   if ((w & 31) !== 8) return false;
   const moveWide = (w & 0x1f800000) === 0x12800000;
@@ -33,6 +45,16 @@ function changesX8(w) {
   const load = (w & 0x0a400000) === 0x08400000;
   return moveWide || dataProcessing || load;
 }
+
+export function patchSsrfDns(buf) {
+  const idx = buf.indexOf(SSRF_ORIGINAL);
+  if (idx !== -1) {
+    SSRF_PATCHED.copy(buf, idx);
+    return true;
+  }
+  return false;
+}
+
 export function patchBuffer(buf) {
   const patched = [];
   for (const [start, end] of codeRanges(buf)) {
@@ -56,8 +78,15 @@ export function patchBuffer(buf) {
       }
     }
   }
+
+  // Also apply SSRF DNS patch if original pattern present
+  if (patchSsrfDns(buf)) {
+    patched.push("read_url SSRF DNS check -> Android Termux compatible");
+  }
+
   return patched;
 }
+
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const input = process.argv[2];

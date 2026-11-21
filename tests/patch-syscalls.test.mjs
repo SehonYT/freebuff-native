@@ -54,3 +54,19 @@ test("invalid and non-arm64 inputs are rejected without writes", () => {
   const wrong = elf([w8(434), SVC]); wrong.writeUInt16LE(62, 18);
   assert.throws(() => patchBuffer(wrong), /AArch64/);
 });
+
+test("patchSsrfDns replaces SSRF pre-check with exact same byte length", () => {
+  const original = Buffer.from(
+    'async function b5J(J,_={}){let T=_.lookupHost??BRA,A=_.isBlocked??dC_,R;try{R=await T(J)}catch(P){throw new pk(`Could not resolve host "${J}": ${P instanceof Error?P.message:"unknown error"}`)}if(R.length===0)throw new pk(`Could not resolve host "${J}"`);for(let P of R)if(A(P))throw new pk(`Host "${J}" resolves to a private or reserved address (${P})`);return R}'
+  );
+  const b = elf([w8(56), SVC]); // valid elf with 1 code segment
+  // Append data containing original SSRF snippet
+  const full = Buffer.concat([b, original]);
+  const fullLen = full.length;
+  assert.equal(patchBuffer(full).length, 1);
+  assert.equal(full.length, fullLen);
+  assert.equal(full.indexOf(original), -1);
+  assert.notEqual(full.indexOf(Buffer.from("hRA.setServers")), -1);
+  assert.equal(patchBuffer(full).length, 0); // Idempotent
+});
+
