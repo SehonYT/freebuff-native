@@ -129,11 +129,30 @@ else
 fi
 
 # --- verify the kernel can run 64-bit code (armv8l can be either) ---
-# ld.so with no executable argument prints its usage; any output at all means
-# the kernel executed the loader. A 32-bit-only kernel refuses the exec.
-if ! env -u LD_PRELOAD -u LD_LIBRARY_PATH -u LD_AUDIT "$LIBDIR/$LOADER" --list 2>&1 | grep -q "ld.so"; then
-  die "this kernel cannot execute ${DEB_ARCH} binaries (32-bit-only kernel?); native freebuff is not possible here"
-fi
+# Step 1: the loader must exist and be a 64-bit AArch64 ELF. This catches a
+# missing or truncated bundle without attempting to execute anything.
+[ -f "$LIBDIR/$LOADER" ] || die "dynamic loader missing at $LIBDIR/$LOADER; re-run install.sh"
+case "$(head -c 4 "$LIBDIR/$LOADER" | od -An -tx1 | tr -d ' \n')" in
+  7f454c46) : ;;
+  *) die "$LIBDIR/$LOADER is not an ELF file; re-run install.sh" ;;
+esac
+
+# Step 2: functional probe. If the kernel refuses a 64-bit exec, bash reports
+# exit 126/127 and produces no loader output; a working kernel prints usage.
+KERNEL_PROBE_RC=0
+KERNEL_PROBE="$(env -u LD_PRELOAD -u LD_LIBRARY_PATH -u LD_AUDIT "$LIBDIR/$LOADER" --list 2>&1)" || KERNEL_PROBE_RC=$?
+case "$KERNEL_PROBE" in
+  *Usage:*|*ld.so*) : ;;
+  *)
+    say "64-bit execution probe failed (exit $KERNEL_PROBE_RC). Diagnostics:"
+    say "  uname -m:   $(uname -m)"
+    say "  kernel:     $(uname -r)"
+    say "  abilist:    $(getprop ro.product.cpu.abilist 2>/dev/null || echo unknown)"
+    say "  abilist64:  $(getprop ro.product.cpu.abilist64 2>/dev/null || echo unknown)"
+    say "  probe out:  ${KERNEL_PROBE:-<none>}"
+    die "this device cannot execute 64-bit (aarch64) binaries, so the Freebuff CLI cannot run natively here. Share the diagnostics above when reporting this."
+    ;;
+esac
 
 # --- official npm launcher package (npm refuses android/arm) ---
 LAUNCHER_DIR="$PREFIX/lib/node_modules/freebuff"

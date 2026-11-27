@@ -39,6 +39,13 @@ ln -sf "$CODEBUFF_RG_PATH" "$CONF/rg" 2>/dev/null || true
 # so that process.execPath points to the binary itself and internal child
 # processes (like the terminal command broker) can re-exec it.
 
+# Start the local CONNECT proxy first: the updater may need it if direct DNS is
+# unavailable, and the CLI needs it anyway.
+if ! (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null; then
+  nohup node "$DIR/proxy.mjs" >/dev/null 2>&1 &
+  sleep 0.3
+fi
+
 # Handle manual update command directly
 if [ "${1:-}" = "update" ] || [ "${1:-}" = "patch-update" ] || [ "${1:-}" = "--update" ]; then
   exec bash "$DIR/update.sh" --manual
@@ -53,11 +60,6 @@ fi
 # Trigger background check for patch updates (non-blocking, throttled to 6h)
 if [ "${FREEBUFF_AUTO_UPDATE:-1}" != "0" ] && [ -f "$DIR/update.sh" ]; then
   nohup bash "$DIR/update.sh" --background >/dev/null 2>&1 &
-fi
-
-if ! (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null; then
-  nohup node "$DIR/proxy.mjs" >/dev/null 2>&1 &
-  sleep 0.3
 fi
 
 repatch() {
